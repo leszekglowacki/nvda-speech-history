@@ -82,6 +82,8 @@ class GlobalPlugin(globalPluginHandler.GlobalPlugin):
 		self._history = deque(maxlen=config.conf[CONFIG_SECTION]['maxHistoryLength'])
 		self._recorded = []
 		self._recording = False
+		self.history_pos = 0
+		self.char_pos = 0
 		self._patch()
 
 	def _patch(self):
@@ -93,7 +95,11 @@ class GlobalPlugin(globalPluginHandler.GlobalPlugin):
 			speech.speak = self.mySpeak
 
 	def script_copyLast(self, gesture):
-		text = self.getSequenceText(self._history[self.history_pos])
+		if not self._history:
+			tones.beep(200, 100)
+			return
+
+		text = self.getCurrentText()
 		if config.conf[CONFIG_SECTION]['trimWhitespaceFromStart']:
 			text = text.lstrip()
 		if config.conf[CONFIG_SECTION]['trimWhitespaceFromEnd']:
@@ -112,25 +118,89 @@ class GlobalPlugin(globalPluginHandler.GlobalPlugin):
 	script_copyLast.category = SCRCAT_SPEECH
 
 	def script_prevString(self, gesture):
+		if not self._history:
+			tones.beep(200, 100)
+			return
+
 		self.history_pos += 1
 		if self.history_pos > len(self._history) - 1:
 			tones.beep(200, 100)
 			self.history_pos -= 1
+		self.char_pos = 0
 		self.oldSpeak(self._history[self.history_pos])
 	# Translators: Documentation string for previous speech history item script
 	script_prevString.__doc__ = _('Review the previous item in NVDA\'s speech history.')
 	script_prevString.category = SCRCAT_SPEECH
 
 	def script_nextString(self, gesture):
+		if not self._history:
+			tones.beep(200, 100)
+			return
+
 		self.history_pos -= 1
 		if self.history_pos < 0:
 			tones.beep(200, 100)
 			self.history_pos += 1
 
+		self.char_pos = 0
 		self.oldSpeak(self._history[self.history_pos])
 	# Translators: Documentation string for next speech history item script
 	script_nextString.__doc__ = _('Review the next item in NVDA\'s speech history.')
 	script_nextString.category = SCRCAT_SPEECH
+
+	def script_prevChar(self, gesture):
+		text = self.getCurrentText()
+		if not text:
+			tones.beep(200, 100)
+			return
+
+		self.char_pos -= 1
+		if self.char_pos < 0:
+			self.char_pos = 0
+			tones.beep(200, 100)
+			return
+
+		self.oldSpeak([text[self.char_pos]])
+	# Translators: Documentation string for previous speech history character script
+	script_prevChar.__doc__ = _('Review the previous character in the currently selected speech history item.')
+	script_prevChar.category = SCRCAT_SPEECH
+
+	def script_nextChar(self, gesture):
+		text = self.getCurrentText()
+		if not text:
+			tones.beep(200, 100)
+			return
+
+		self.char_pos += 1
+		if self.char_pos > len(text) - 1:
+			self.char_pos = len(text) - 1
+			tones.beep(200, 100)
+			return
+
+		self.oldSpeak([text[self.char_pos]])
+	# Translators: Documentation string for next speech history character script
+	script_nextChar.__doc__ = _('Review the next character in the currently selected speech history item.')
+	script_nextChar.category = SCRCAT_SPEECH
+
+	def script_copyCurrentChar(self, gesture):
+		text = self.getCurrentText()
+		if not text:
+			tones.beep(200, 100)
+			return
+
+		if self.char_pos > len(text) - 1:
+			self.char_pos = len(text) - 1
+
+		postCopyAction = config.conf[CONFIG_SECTION]['postCopyAction']
+		if api.copyToClip(text[self.char_pos]):
+			if postCopyAction in (POST_COPY_BEEP, POST_COPY_BOTH):
+				tones.beep(config.conf[CONFIG_SECTION]['beepFrequency'], config.conf[CONFIG_SECTION]['beepDuration'])
+			if postCopyAction in (POST_COPY_SPEAK, POST_COPY_BOTH):
+				# Translators: A short confirmation message spoken after copying a speech history character.
+				self.oldSpeak([_('Copied')])
+	# Translators: Documentation string for copy current speech history character script
+	script_copyCurrentChar.__doc__ = _('Copy the currently selected character from the selected speech history item to the clipboard.')
+	script_copyCurrentChar.category = SCRCAT_SPEECH
 
 	def script_startRecording(self, gesture):
 		if self._recording:
@@ -193,6 +263,7 @@ class GlobalPlugin(globalPluginHandler.GlobalPlugin):
 		seq = [command for command in seq if not isinstance(command, FocusLossCancellableSpeechCommand)]
 		self._history.appendleft(seq)
 		self.history_pos = 0
+		self.char_pos = 0
 		if self._recording:
 			self._recorded.append(self.getSequenceText(seq))
 
@@ -205,10 +276,18 @@ class GlobalPlugin(globalPluginHandler.GlobalPlugin):
 	def getSequenceText(self, sequence):
 		return speechViewer.SPEECH_ITEM_SEPARATOR.join([x for x in sequence if isinstance(x, str)])
 
+	def getCurrentText(self):
+		if not self._history:
+			return ''
+		return self.getSequenceText(self._history[self.history_pos])
+
 	__gestures = {
 		'kb:f12': 'copyLast',
+		'kb:control+f12': 'copyCurrentChar',
 		'kb:shift+f11': 'prevString',
 		'kb:shift+f12': 'nextString',
+		'kb:control+shift+f11': 'prevChar',
+		'kb:control+shift+f12': 'nextChar',
 		'kb:NVDA+shift+f11': 'startRecording',
 		'kb:NVDA+shift+f12': 'stopRecording',
 		'kb:NVDA+h': 'showHistory',
